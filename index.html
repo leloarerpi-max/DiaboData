@@ -216,7 +216,7 @@ th.miss{box-shadow:inset 0 -3px 0 var(--brand-orange)}
   </div>
   <div id="drop">
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="sec" id="clear" type="button">Tout effacer</button><button class="sec" id="copyfile" type="button">Télécharger une copie avec mes données</button></div>
-    <div class="dstatus"><div class="st" id="copyhint"></div></div>
+    <div class="dstatus"><div class="st" id="copyhint"></div><div class="st" id="cloudst">Cloud : connexion…</div></div>
   </div>
   <div id="stash" hidden><div class="st" id="status"></div><label class="btn" id="addrate">Ajouter CSV Appels traités / présentés<input type="file" id="file" accept=".csv,text/csv" multiple></label></div>
 </div>
@@ -239,7 +239,11 @@ const prodMonthRaw=new Map(); // mois -> {agents:{nom:{in,out}}} (fichier de tot
 const campRaw=new Map(); // jour -> {tried, agent, system}
 let persistOn=false; const KEY='diabolomail_v1';
 function snapshotState(){ return {store:[...store.values()],prod:[...prodRaw],camp:[...campRaw],wrapM:[...wrapByMonth],notes:[...notes],prodM:[...prodMonthRaw],ign:[...ignored],ns:1,at:Date.now()}; }
-function persist(){ if(!persistOn) return; try{localStorage.setItem(KEY,JSON.stringify(snapshotState()))}catch(e){} }
+let _cloudT=null, _applying=false;
+function setCloud(t){ const e=document.getElementById('cloudst'); if(e) e.textContent=t; }
+function persist(){ if(!persistOn||_applying) return; const st=snapshotState();
+  try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}
+  clearTimeout(_cloudT); _cloudT=setTimeout(()=>{ if(window.cloudSave) window.cloudSave(st); },800); }
 
 function parseCSV(text){
   const lines = text.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());
@@ -776,6 +780,23 @@ if(!(sv&&sv.ns)){ Object.entries(PRESET_NOTES).forEach(([d,t])=>{ if(!notes.has(
 fillMonthPickers();
 persistOn=true; curMonth=null; refresh(); renderProd(); renderCamp(); renderWrap(); showTab('t');
 
+/* ---------- Synchronisation Firebase (Realtime Database) ---------- */
+function applyState(s){ _applying=true; try{
+  store.clear(); prodRaw.clear(); campRaw.clear(); prodMonthRaw.clear(); notes.clear(); ignored.clear(); wrapByMonth.clear();
+  (s.store||[]).forEach(r=>store.set(r.day+'|'+r.slot,r)); (s.prod||[]).forEach(([k,v])=>prodRaw.set(k,v)); (s.prodM||[]).forEach(([k,v])=>prodMonthRaw.set(k,v));
+  (s.camp||[]).forEach(([k,v])=>campRaw.set(k,v)); (s.notes||[]).forEach(([k,v])=>notes.set(k,v)); (s.ign||[]).forEach(d=>ignored.add(d)); (s.wrapM||[]).forEach(([k,v])=>wrapByMonth.set(k,v));
+  fromSample=false; curMonth=null; refresh(); renderProd(); renderCamp(); renderWrap();
+}finally{ _applying=false } }
+window.bootCloud=async function(){
+  try{
+    const remote=await window.cloudLoad(); const localAt=(sv&&sv.at)||0;
+    if(remote&&(remote.at||0)>localAt){ applyState(remote); sv=remote; try{localStorage.setItem(KEY,JSON.stringify(remote))}catch(e){} setCloud('Cloud : données chargées ✓'); }
+    else if(sv&&(!remote||localAt>(remote.at||0))){ await window.cloudSave(sv); }
+    else setCloud('Cloud : connecté (aucune donnée enregistrée pour l\'instant)');
+  }catch(e){ setCloud('Cloud : indisponible, données gardées dans ce navigateur'); }
+};
+if(window.cloudLoad) window.bootCloud();
+
 /* ---------- Copie du fichier avec les données ---------- */
 $('copyfile').addEventListener('click',()=>{
   try{
@@ -788,5 +809,30 @@ $('copyfile').addEventListener('click',()=>{
     $('copyhint').textContent='Copie téléchargée : envoyez ce fichier, vos données sont dedans. Si rien ne se télécharge, ouvrez la page depuis le fichier diabodata.html enregistré sur votre ordinateur.';
   }catch(e){ $('copyhint').textContent='Téléchargement impossible ici. Ouvrez la page depuis le fichier diabodata.html enregistré sur votre ordinateur.'; }
 });
+</script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
+import { getDatabase, ref, set, get } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-database.js";
+const firebaseConfig = {
+  apiKey: "AIzaSyDqgi4TFlRYsTL79TVq7mnWJg5SYB8S6M0",
+  authDomain: "diabodata.firebaseapp.com",
+  databaseURL: "https://diabodata-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "diabodata",
+  storageBucket: "diabodata.firebasestorage.app",
+  messagingSenderId: "937954493822",
+  appId: "1:937954493822:web:452884a36f3f83c0c05f2f"
+};
+const db = getDatabase(initializeApp(firebaseConfig));
+const R = ref(db, 'diabodata/state');
+window.cloudSave = async (st) => {
+  try { await set(R, { json: JSON.stringify(st), at: st.at || Date.now() }); window.setCloud && window.setCloud('Cloud : enregistré ✓ ' + new Date().toLocaleTimeString('fr-FR')); }
+  catch (e) { window.setCloud && window.setCloud('Cloud : échec de l\'enregistrement (' + (e.code || e.message) + ')'); }
+};
+window.cloudLoad = async () => {
+  const s = await get(R); if (!s.exists()) return null;
+  const v = s.val(); return JSON.parse(v.json);
+};
+window.setCloud = (t) => { const e = document.getElementById('cloudst'); if (e) e.textContent = t; };
+window.bootCloud && window.bootCloud();
 </script>
 </body></html>
