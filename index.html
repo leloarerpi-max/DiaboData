@@ -423,7 +423,9 @@ function refresh(){
 function addText(text,name){
   const rows=parseCSV(text); if(!rows.length) throw new Error('Aucune ligne de données dans '+name);
   lastMonth=rows.map(r=>r.day).sort().pop().slice(0,7); fromSample=false; // les dépôts s'ajoutent aux données déjà chargées
-  rows.forEach(r=>store.set(r.day+'|'+r.slot,r)); // un même jour redéposé remplace l'ancien
+  const newDays=new Set(rows.map(r=>r.day));
+  [...store.keys()].forEach(k=>{ if(newDays.has(k.split('|')[0])) store.delete(k); }); // un jour redéposé remplace TOUT l'ancien jour
+  rows.forEach(r=>store.set(r.day+'|'+r.slot,r));
   names.push(name);
 }
 function load(text,name){ try{addText(text,name); refresh()}catch(err){refresh(); $('status').textContent='Erreur : '+err.message} }
