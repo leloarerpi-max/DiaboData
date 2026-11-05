@@ -110,6 +110,7 @@ th.miss{box-shadow:inset 0 -3px 0 var(--brand-orange)}
   .pnotes{display:block;padding:6px 14px;font-size:10px}
   .pnotes:empty{display:none}
 }
+.deb th,.deb td{background:var(--tint)} .deb td.neg{color:var(--bad-fg)}
 .dayh{cursor:pointer;user-select:none}
 .dayh:hover{background:var(--total)!important}
 .dayh:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -530,11 +531,22 @@ function renderProd(){
     lines.push([label,...vals,t]); body+=`<tr><th scope="row">${label}</th>${vals.map(v=>`<td>${v}</td>`).join('')}<td class="avg">${t}</td></tr>`};
   list.forEach(n=>{ const a=monthOnly?(mm.agents[n]||{in:0,out:0}):null; const blank=days.map(()=>'');
     addRow(dn(n)+' entrant',monthOnly?blank:days.map(d=>cv(d,n,'in')),a?a.in:null); addRow(dn(n)+' campagne / manuels',monthOnly?blank:days.map(d=>cv(d,n,'out')),a?a.out:null);});
-  const dt=dayTot.map((v,k)=>has(days[k])?v:''); lines.push([monthOnly?'TOTAL':'TOTAL JOUR',...dt,grand]);
+  const dt=dayTot.map((v,k)=>has(days[k])?v:'');
+  // Débordement Gestion = appels traités du jour (synthèse files) − TOTAL JOUR productivité ; calculé, absent des fichiers
+  const hDay={}; store.forEach(r=>{ if(r.day.startsWith(curMonth)) hDay[r.day]=(hDay[r.day]||0)+r.handled; });
+  const debV=days.map((d,k)=>(has(d)&&hDay[d]!=null)?hDay[d]-dt[k]:'');
+  let debTot=debV.some(v=>v!=='')?debV.reduce((a,b)=>a+(b===''?0:b),0):'';
+  let debNote='';
+  if(debTot===''){ const mh=Object.values(hDay).reduce((a,b)=>a+b,0)||((HIST.find(a=>a[0]===curMonth)||[])[2]); if(mh&&grand){ debTot=mh-grand; debNote=' Pas de synthèse jour par jour pour ce mois : seul le total du mois est calculé (traités du mois − total productivité).'; } }
+  const debOn=debTot!=='';
+  const dcell=v=>`<td${v!==''&&v<0?' class="neg"':''}>${v}</td>`;
+  if(debOn){ lines.push(['Débordement Gestion',...debV,debTot]); body+=`<tr class="deb"><th scope="row">Débordement Gestion</th>${debV.map(dcell).join('')}<td class="avg${debTot<0?' neg':''}">${debTot}</td></tr>`; }
+  lines.push([monthOnly?'TOTAL':'TOTAL JOUR',...dt,grand]);
   body+=`<tr class="tot"><th scope="row">${monthOnly?'TOTAL':'TOTAL JOUR'}</th>${dt.map(v=>`<td>${v}</td>`).join('')}<td class="avg">${grand}</td></tr>`;
   tsvStore.prod=lines.map(r=>r.join('\t')).join('\n');
   $('ptable').innerHTML=`<table><thead><tr>${head.map(x=>`<th${x==='Total mois'?' class="avg"':''}>${x}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
   const neg=dataDays.some(d=>list.some(n=>daily[d][n].in<0||daily[d][n].out<0));
+  setTimeout(()=>{ if(debOn) $('pnote').textContent+=' Débordement Gestion = appels traités du jour (tableau Appels traités / présentés) − TOTAL JOUR productivité.'+debNote; },0);
   $('pnote').textContent=(monthOnly?`Total du mois ${monthName(curMonth)} (fichier ${mm.name}). Ce fichier ne contient pas les jours : c'est normal, seul le total du mois s'affiche. `:(dataDays.length?'':'Aucun fichier chargé : déposez AGENTS_PRODUCTIVITY_PER_DAY.csv. '))+'Campagne / manuels = appels sortants + appels libres (freeCalls). Les e-mails ne sont pas comptés. Un même jour redéposé remplace le précédent.'+(neg?' Attention : un cumul donne un résultat négatif. Déposez les fichiers dans l\'ordre des dates.':'');
 }
 $('pfile').addEventListener('change',e=>{readFiles(e.target.files,true); e.target.value=''});
