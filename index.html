@@ -266,6 +266,7 @@ function persist(){ if(!persistOn) return; if(window.SHARED_MODE){ schedulePush(
 
 function parseCSV(text){
   const lines = text.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length) throw new Error('le fichier est vide (rien n\'a été lu). Réessayez, ou ré-exportez le CSV depuis Genesys.');
   const sep = (lines[0].match(/;/g)||[]).length >= (lines[0].match(/,/g)||[]).length ? ';' : ',';
   const head = lines[0].split(sep).map(s=>s.trim());
   const need = ['date','callsPresented','handledRate','callsHandled'];
@@ -445,7 +446,7 @@ function addText(text,name){
   rows.forEach(r=>store.set(r.day+'|'+r.slot,r)); // un même jour redéposé remplace l'ancien
   names.push(name);
 }
-function load(text,name){ try{addText(text,name); refresh()}catch(err){refresh(); $('status').textContent='Erreur : '+err.message} }
+function load(text,name){ try{addText(text,name); refresh()}catch(err){refresh(); $('status').textContent='Erreur ('+name+') : '+err.message} }
 /* ---------- Lecture tolérante des CSV (guillemets, séparateur, formats de date) ---------- */
 const csvSep=line=>[';','\t',','].map(x=>[x,line.split(x).length]).sort((a,b)=>b[1]-a[1])[0][0];
 const csvCells=(l,sep)=>l.split(sep).map(x=>x.trim().replace(/^"(.*)"$/,'$1').trim());
@@ -861,7 +862,8 @@ async function pushNow(){
   const add=(key,val)=>{ const [m,f,k]=key.split('|'); const p=(patches[m]??={}); if(f==='wrap'||f==='prodM') p[f]=val; else (p[f]??={})[k]=val; };
   L.forEach((v,key)=>{ if(remoteLeaves.get(key)!==v) add(key,v) });
   remoteLeaves.forEach((v,key)=>{ if(!L.has(key)) add(key,SB.DELETE) });
-  try{ for(const [m,p] of Object.entries(patches)) await SB.write(m,p); if(Object.keys(patches).length) setShare('Enregistré pour tout le monde ✓'); }
+  const nP=Object.keys(patches).length; if(nP) setShare('Enregistrement en cours…');
+  try{ for(const [m,p] of Object.entries(patches)) await Promise.race([SB.write(m,p),new Promise((_,ko)=>setTimeout(()=>ko(new Error('le serveur ne répond pas (réseau bloqué ou base non créée ?). Rien n\'est enregistré pour les autres.')),15000))]); if(nP) setShare('Enregistré pour tout le monde ✓'); }
   catch(e){ setShare('⚠ Enregistrement refusé : '+(e&&e.message||e)); applyLeaves(remoteLeaves); rerenderAll(); }
   pushTimer=null; if(deferredDocs){ const d=deferredDocs; deferredDocs=null; onDocs(d); }
 }
@@ -878,7 +880,7 @@ async function loadFirebaseBackend(cfg){
   const base='https://www.gstatic.com/firebasejs/10.14.1/';
   const OPEN=!!cfg.open;
   const [{initializeApp},A,F]=await Promise.all([import(base+'firebase-app.js'),OPEN?null:import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
-  const app=initializeApp(cfg), auth=OPEN?null:A.getAuth(app), db=F.getFirestore(app), DELETE=F.deleteField();
+  const app=initializeApp(cfg), auth=OPEN?null:A.getAuth(app), db=F.initializeFirestore(app,{experimentalForceLongPolling:true,useFetchStreams:false}), DELETE=F.deleteField();
   return { DELETE,
     async init(){ if(OPEN) return; if(A.isSignInWithEmailLink(auth,location.href)){ let email=localStorage.getItem('diabo_email')||prompt('Confirmez votre adresse e-mail pour terminer la connexion :');
         if(email){ await A.signInWithEmailLink(auth,email,location.href); localStorage.removeItem('diabo_email'); } history.replaceState(null,'',location.pathname); } },
