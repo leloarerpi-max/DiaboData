@@ -9,7 +9,7 @@
    Pour partager les données : collez ici la configuration de votre projet Firebase, par exemple :
    window.FIREBASE_CONFIG = { apiKey:"...", authDomain:"...firebaseapp.com", projectId:"...", appId:"..." };
    (voir le fichier LISEZMOI-PARTAGE.md) */
-window.FIREBASE_CONFIG = null;
+window.FIREBASE_CONFIG = {open:true, apiKey:"AIzaSyBY1DOlWNwcL3Ofc3JCjXpr-WO3VXq5mjs", authDomain:"diabodata-34b16.firebaseapp.com", projectId:"diabodata-34b16", storageBucket:"diabodata-34b16.firebasestorage.app", messagingSenderId:"66022975831", appId:"1:66022975831:web:d959d3df6c25f1b6d2f612"};
 window.SHARED_MODE = !!(window.FIREBASE_CONFIG || window.__diaboBackend);
 </script>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -229,7 +229,7 @@ body.sharedlock .wrap{visibility:hidden} .deb td.neg{color:var(--bad-fg)}
     <div class="note" style="padding:0">Appels présentés = traités + abandonnés + dissuadés. Taux de QS = appels traités ÷ appels présentés. Janvier 2025 à septembre 2026 viennent de votre fichier Excel. Les mois des CSV déposés remplacent ceux de l'Excel et peuvent être incomplets (octobre est en cours).</div>
   </div>
   <div id="drop">
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="sec" id="clear" type="button">Tout effacer</button><button class="sec" id="ghexp" type="button">Exporter pour GitHub (chiffré)</button><button class="sec" id="ghlink" type="button">Copier le lien d'accès</button><button class="sec" id="ghnew" type="button">Changer la clé</button><button class="sec" id="copyfile" type="button">Télécharger une copie avec mes données</button><button class="sec" id="migrate" type="button" hidden>Envoyer mes données de ce navigateur au partage</button><button class="sec" id="logout" type="button" hidden>Se déconnecter</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="sec" id="clear" type="button">Tout effacer</button><button class="sec" id="ghexp" type="button">Exporter pour GitHub</button><button class="sec" id="copyfile" type="button">Télécharger une copie avec mes données</button><button class="sec" id="migrate" type="button" hidden>Envoyer mes données de ce navigateur au partage</button><button class="sec" id="logout" type="button" hidden>Se déconnecter</button></div>
     <div class="st" id="sharebar" hidden></div>
     <div class="dstatus"><div class="st" id="copyhint"></div></div>
   </div>
@@ -846,7 +846,7 @@ function applyLeaves(L){
 }
 function rerenderAll(){ refresh(); renderProd(); renderCamp(); renderWrap(); updateNote(); }
 function setShare(t){ const b=$('sharebar'); if(b){ b.hidden=!t; b.textContent=t||'' } }
-function shareLine(user){ const m=lastMeta; return `Données partagées · connecté : ${user||''}`+(m&&m.at?` · dernière mise à jour : ${new Date(m.at).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'})}${m.by?' par '+m.by:''}`:''); }
+function shareLine(user){ const m=lastMeta; return `Données partagées pour tous`+(user?` · connecté : ${user}`:'')+(m&&m.at?` · dernière mise à jour : ${new Date(m.at).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'})}${m.by?' par '+m.by:''}`:''); }
 let sbUser='';
 function onDocs(docs){
   if(pushTimer){ deferredDocs=docs; return; } // une modification locale part dans un instant : on n'écrase pas ce que vous venez de saisir
@@ -876,16 +876,17 @@ $('migrate').addEventListener('click',()=>{
 });
 async function loadFirebaseBackend(cfg){
   const base='https://www.gstatic.com/firebasejs/10.14.1/';
-  const [{initializeApp},A,F]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
-  const app=initializeApp(cfg), auth=A.getAuth(app), db=F.getFirestore(app), DELETE=F.deleteField();
+  const OPEN=!!cfg.open;
+  const [{initializeApp},A,F]=await Promise.all([import(base+'firebase-app.js'),OPEN?null:import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
+  const app=initializeApp(cfg), auth=OPEN?null:A.getAuth(app), db=F.getFirestore(app), DELETE=F.deleteField();
   return { DELETE,
-    async init(){ if(A.isSignInWithEmailLink(auth,location.href)){ let email=localStorage.getItem('diabo_email')||prompt('Confirmez votre adresse e-mail pour terminer la connexion :');
+    async init(){ if(OPEN) return; if(A.isSignInWithEmailLink(auth,location.href)){ let email=localStorage.getItem('diabo_email')||prompt('Confirmez votre adresse e-mail pour terminer la connexion :');
         if(email){ await A.signInWithEmailLink(auth,email,location.href); localStorage.removeItem('diabo_email'); } history.replaceState(null,'',location.pathname); } },
     onAuth(cb){ A.onAuthStateChanged(auth,u=>cb(u?{email:u.email}:null)); },
     async sendLink(email){ await A.sendSignInLinkToEmail(auth,email,{url:location.origin+location.pathname,handleCodeInApp:true}); localStorage.setItem('diabo_email',email); },
     signOut(){ return A.signOut(auth); },
     subscribe(cb,errcb){ return F.onSnapshot(F.collection(db,'diabodata'),snap=>{ const docs={}; snap.docs.forEach(d=>{ const x=d.data(); if(x.meta&&x.meta.at&&x.meta.at.toMillis) x.meta={by:x.meta.by,at:x.meta.at.toMillis()}; docs[d.id]=x; }); cb(docs); },errcb); },
-    async write(month,patch){ const data={meta:{by:auth.currentUser&&auth.currentUser.email,at:F.serverTimestamp()}};
+    async write(month,patch){ const data={meta:{by:auth&&auth.currentUser?auth.currentUser.email:'équipe',at:F.serverTimestamp()}};
       Object.entries(patch).forEach(([f,v])=>{ data[f]=v; });
       await F.setDoc(F.doc(db,'diabodata',month),data,{merge:true}); }
   };
@@ -895,6 +896,7 @@ async function startShared(){
   $('lintro').textContent='Chargement…';
   try{ SB=window.__diaboBackend||await loadFirebaseBackend(window.FIREBASE_CONFIG); await SB.init(); }
   catch(e){ $('lmsg').textContent='Connexion au serveur impossible : '+(e&&e.message||e); return; }
+  if(window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.open){ sbUser=''; $('login').hidden=true; setShare('Chargement des données partagées…'); SB.subscribe(onDocs,err=>{ setShare('⚠ Lecture impossible : '+(err&&err.message||err)); }); return; }
   $('lintro').textContent='Entrez votre adresse e-mail professionnelle : vous allez recevoir un lien de connexion (pas de mot de passe).';
   let unsub=null;
   SB.onAuth(user=>{
@@ -931,7 +933,7 @@ async function ghUnpack(buf,k){
   return new TextDecoder().decode(raw);
 }
 function ghMerge(remote){ // remote: [[clé,valeur]…] ; les mois du fichier remplacent ceux de cet appareil (sauf pour l'administrateur qui garde les siens)
-  const adm=(()=>{try{return localStorage.getItem(GHADM)==='1'}catch(e){return false}})();
+  const adm=false;
   const R=new Map(remote), L=toLeaves(), rm=new Set(), lm=new Set();
   R.forEach((v,key)=>rm.add(key.split('|')[0])); L.forEach((v,key)=>lm.add(key.split('|')[0]));
   rm.forEach(m=>{ if(adm&&lm.has(m)) return; [...L.keys()].forEach(key=>{ if(key.split('|')[0]===m) L.delete(key) }); R.forEach((v,key)=>{ if(key.split('|')[0]===m) L.set(key,v) }); });
@@ -939,31 +941,20 @@ function ghMerge(remote){ // remote: [[clé,valeur]…] ; les mois du fichier re
   rerenderAll(); if(!$('tab-charts').hidden) renderCharts();
 }
 async function ghLoad(){
-  if(!/^https?:$/.test(location.protocol)||!window.crypto||!crypto.subtle) return;
-  const k=ghGetKey(); let r;
-  try{ r=await fetch('data/donnees.enc?t='+Date.now(),{cache:'no-store'}); }catch(e){ return; }
-  if(!r.ok) return;
-  if(!k){ setShare('Des données partagées existent mais cet appareil n\'a pas la clé : ouvrez le lien d\'accès que vous avez reçu.'); return; }
-  try{ const d=JSON.parse(await ghUnpack(await r.arrayBuffer(),k)); ghLastAt=d.at||0; ghMerge(d.leaves||[]);
-    setShare('Données partagées chargées'+(d.at?' · mises à jour le '+new Date(d.at).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}):'')); }
-  catch(e){ setShare('⚠ Lecture impossible : clé incorrecte ou fichier abîmé. Demandez un nouveau lien d\'accès.'); }
+  if(window.SHARED_MODE||!/^https?:$/.test(location.protocol)) return;
+  let d=null;
+  try{ const r=await fetch('data/donnees.json?t='+Date.now(),{cache:'no-store'}); if(r.ok) d=await r.json(); }catch(e){}
+  if(!d&&window.crypto&&crypto.subtle){ const k=ghGetKey(); if(k){ try{ const r=await fetch('data/donnees.enc?t='+Date.now(),{cache:'no-store'}); if(r.ok) d=JSON.parse(await ghUnpack(await r.arrayBuffer(),k)); }catch(e){} } }
+  if(!d||!d.leaves) return;
+  ghMerge(d.leaves); setShare('Données partagées chargées'+(d.at?' · mises à jour le '+new Date(d.at).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}):''));
 }
+if(window.SHARED_MODE) $('ghexp').hidden=true;
 function ghDownload(blob,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
-$('ghlink').addEventListener('click',async()=>{
-  let k=ghGetKey(); if(!k) k=ghNewKey();
-  const url=location.origin+location.pathname+'#cle='+k;
-  try{ await navigator.clipboard.writeText(url); $('copyhint').textContent='Lien d\'accès copié. Envoyez-le uniquement à vos collègues et gardez-en une copie en lieu sûr : sans la clé, les données déjà publiées ne seraient plus lisibles.'; }
-  catch(e){ $('copyhint').textContent='Copiez ce lien d\'accès : '+url; }
-});
-$('ghexp').addEventListener('click',async()=>{
-  if(!window.crypto||!crypto.subtle){ $('copyhint').textContent='Chiffrement indisponible ici : ouvrez la page depuis GitHub ou depuis le fichier enregistré.'; return; }
-  let k=ghGetKey(); if(!k) k=ghNewKey();
-  try{ const out=await ghPack(JSON.stringify({v:1,at:Date.now(),leaves:[...toLeaves()]}),k);
-    ghDownload(new Blob([out],{type:'application/octet-stream'}),'donnees.enc');
-    $('copyhint').textContent='Fichier donnees.enc téléchargé : déposez-le dans le dossier « data » du dépôt GitHub (remplacez l\'ancien). Il est chiffré : il est illisible sans votre lien d\'accès.'; }
+$('ghexp').addEventListener('click',()=>{
+  try{ ghDownload(new Blob([JSON.stringify({v:1,at:Date.now(),leaves:[...toLeaves()]})],{type:'application/json'}),'donnees.json');
+    $('copyhint').textContent='Fichier donnees.json téléchargé : déposez-le dans le dossier « data » du dépôt GitHub, à la place de l\'ancien (même nom). Tout le monde verra alors ces données en ouvrant la page.'; }
   catch(e){ $('copyhint').textContent='Export impossible : '+(e&&e.message||e); }
 });
-$('ghnew').addEventListener('click',()=>{ if(!confirm('Créer une nouvelle clé ? Les anciens liens ne marcheront plus : il faudra ré-exporter vers GitHub et renvoyer le nouveau lien.')) return; ghNewKey(); $('copyhint').textContent='Nouvelle clé créée. Cliquez sur « Copier le lien d\'accès » puis « Exporter pour GitHub » et remplacez donnees.enc.'; });
 ghLoad();
 
 /* ---------- Copie du fichier avec les données ---------- */
